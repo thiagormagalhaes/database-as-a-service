@@ -38,6 +38,23 @@ class Project(BaseModel):
     is_active = models.BooleanField(
         verbose_name=_("Is project active"), default=True)
     slug = models.SlugField()
+    business_service = models.CharField(
+        verbose_name=_("Business Service"), max_length=200,
+        choices=(('', ''),), default='', null=False, blank=False
+    )
+    client = models.CharField(
+        max_length=200, choices=(('', ''),), default='', null=False,
+        blank=False
+    )
+    product = models.CharField(
+        max_length=200, choices=(('', ''),), default=''
+    )
+    component = models.CharField(
+        max_length=200, choices=(('', ''),), default=''
+    )
+    subcomponent = models.CharField(
+        max_length=200, choices=(('', ''),), default=''
+    )
 
     def __unicode__(self):
         return "%s" % self.name
