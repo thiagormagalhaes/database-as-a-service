@@ -3,6 +3,22 @@ from django import template
 register = template.Library()
 
 
+class PdbNode(template.Node):
+    def render(self, context):
+        try:
+            import ipdb as pdb
+        except ImportError:
+            import pdb
+
+        pdb.set_trace()
+        return ''
+
+
+@register.tag
+def pdb_debug(parser, token):
+    return PdbNode()
+
+
 @register.inclusion_tag('admin/submit_line.html', takes_context=True)
 def submit_row_extended_save_continue(context, add_confirmation=False):
     """
