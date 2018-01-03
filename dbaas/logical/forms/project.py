@@ -50,7 +50,7 @@ class RemoteChoiceField(forms.ChoiceField):
             )
             if resp.ok:
                 remote_choices = map(
-                    lambda i: (str(i['id']), i['nome']),
+                    lambda i: (str(i['id_service_now']), i['nome']),
                     sorted(resp.json(), key=lambda i: i['nome'])
                 )
                 return empty_choice + remote_choices
