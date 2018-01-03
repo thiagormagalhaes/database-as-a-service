@@ -213,6 +213,17 @@ class MongoDB(BaseDriver):
                 raise ConnectionError(
                     'Error connection to databaseinfra %s: %s' % (self.databaseinfra, e.message))
 
+    def get_total_size_from_instance(self, instance):
+        return (self.databaseinfra.disk_offering.size_bytes()
+                if self.databaseinfra.disk_offering else 0.0)
+
+    def get_used_size_from_instance(self, instance):
+        with self.pymongo(instance=instance) as client:
+            database_info = client.admin.command('listDatabases')
+            return database_info.get(
+                'totalSize', 0
+            )
+
     def info(self):
         databaseinfra_status = DatabaseInfraStatus(
             databaseinfra_model=self.databaseinfra)
@@ -384,7 +395,7 @@ class MongoDB(BaseDriver):
         client = self.get_client(None)
         try:
             client.admin.command('replSetStepDown', 10)
-        except pymongo.errors.AutoReconnect, e:
+        except pymongo.errors.AutoReconnect:
             pass
 
     def get_database_agents(self):
@@ -470,7 +481,6 @@ class MongoDB(BaseDriver):
         config['REPLICASETNAME'] = self.get_replica_name()
         config['MONGODBKEY'] = instance.databaseinfra.database_key
         return config
-
 
     def configuration_parameters_for_log_resize(self, instance):
         return {

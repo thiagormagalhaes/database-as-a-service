@@ -1,43 +1,11 @@
 {% extends "logical/database/details/base.html" %}
 {% load capacity admin_static %}
 
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" type="text/css" href="{% static 'admin/progress_bar.css' %}" />
+{% endblock extrastyle %}
 {% block tab %}
-<style>
-    .controls.controls-300 {
-        width: 300px;
-    }
-    .progress {
-        margin-bottom: 10px;
-    }
-    .progress-bar.bar {
-        float: right;
-    }
-     .bar.database-bar {
-        background-image: none;
-    }
-     .bar.other-bar {
-        background-image: none;
-    }
-     .bar.free-bar {
-        background-image: none;
-    }
-    .bar-label-container, .bar-label-container {
-        font-size: 16px;
-    }
-    .bar-label-container .bar-label {
-        line-height: 25px;
-    }
-    .bar-label-container .bar-label .bar-label-color, .bar-label-container .bar-label .bar-label-text {
-        display: inline-block;
-    }
-    .bar-label-container .bar-label .bar-label-color {
-        width: 10px;
-        height: 10px;
-    }
-    .bar-label-container .bar-label .bar-label-text {
-        width: 70px;
-    }
-</style>
 
 <fieldset class="module aligned ">
   <div class="control-group">
@@ -117,22 +85,44 @@
     <div class="control-label"><label>Environment:</label></div>
     <div class="controls"><p class="readonly">{{ database.environment }}</p></div>
   </div>
-  <div class="control-group">
-    <div class="control-label"><label>Disk:</label></div>
-    <div class="controls"><p class="readonly">{{ database.infra.disk_offering }}</p></div>
-    <div class="controls controls-300">{% render_detailed_capacity_html database disk %}</div>
-  </div>
-  {% if database.engine.engine_type.is_in_memory %}
+
+  {% if database.has_persistence %}
+    <div class="control-group">
+      <div class="control-label"><label>Disk:</label></div>
+      <div class="controls">
+        <p class="readonly">
+          total {% widthratio database.infra.disk_offering.size_gb 1 masters_quant %} GB
+          {% if masters_quant > 1 %}
+            ({{ masters_quant }} x {{ database.infra.disk_offering.size_gb }} GB)
+          {% endif %}
+        </p>
+      </div>
+      <div class="controls controls-300">{% render_detailed_capacity_html database disk %}</div>
+    </div>
+  {% endif %}
+
+  {% if database.is_in_memory %}
     <div class="control-group">
       <div class="control-label"><label>Memory database:</label></div>
-        <div class="controls"><p class="readonly">Total ({{ database.total_size_in_gb }} GB)</p></div>
+      <div class="controls">
+        <p class="readonly">
+          {% if database.total_size_in_gb %}
+            total {{ database.total_size_in_gb }} GB
+            {% if masters_quant > 1 %}
+              ({{ masters_quant }} x {{ database.driver.get_master_instance_total_size_in_gb }} GB)
+            {% endif %}
+          {% else %}
+            Total memory size not collected yet. Will be updated in a few minutes...
+          {% endif %}
+        </p>
+      </div>
       <div class="controls controls-300">{% render_detailed_capacity_html database memory %}</div>
     </div>
     <div class="control-group">
       <div class="control-label"><label>Persisted:</label></div>
       <div class="controls">
         <p class="readonly">
-          {% if database.plan.has_persistence %}
+          {% if database.has_persistence %}
             Yes
           {% else %}
             No

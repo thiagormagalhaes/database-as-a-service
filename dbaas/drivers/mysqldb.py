@@ -6,13 +6,16 @@ import logging
 import _mysql as mysqldb
 import _mysql_exceptions
 from contextlib import contextmanager
-from .base import BaseDriver, DatabaseInfraStatus, DatabaseStatus
-from .errors import AuthenticationError, ConnectionError, GenericDriverError, \
-    DatabaseAlreadyExists, InvalidCredential, DatabaseDoesNotExist, \
-    CredentialAlreadyExists, ReplicationNotRunningError
+
 from util import make_db_random_password
 from system.models import Configuration
 from physical.models import Instance
+
+from drivers import BaseDriver, DatabaseInfraStatus, DatabaseStatus
+from drivers.errors import AuthenticationError, ConnectionError, GenericDriverError, \
+    DatabaseAlreadyExists, InvalidCredential, DatabaseDoesNotExist, \
+    CredentialAlreadyExists, ReplicationNotRunningError
+
 
 LOG = logging.getLogger(__name__)
 
@@ -142,6 +145,22 @@ class MySQL(BaseDriver):
     def query(self, query_string, instance=None):
         return self.__query(query_string, instance)
 
+    def get_total_size_from_instance(self, instance):
+        return (self.databaseinfra.disk_offering.size_bytes()
+                if self.databaseinfra.disk_offering else 0.0)
+
+    def get_used_size_from_instance(self, instance):
+        db_sizes = self.query("SELECT s.schema_name 'Database', ifnull(SUM( t.data_length + t.index_length), 0) 'Size' \
+                                FROM information_schema.SCHEMATA s \
+                                left outer join information_schema.TABLES t on s.schema_name = t.table_schema \
+                                GROUP BY s.schema_name", instance=instance)
+        return sum(
+            map(
+                lambda d: float(d.get('Size', 0)),
+                db_sizes
+            )
+        )
+
     def info(self):
         from logical.models import Database
 
@@ -151,7 +170,6 @@ class MySQL(BaseDriver):
         r = self.__query("SELECT VERSION()")
         databaseinfra_status.version = r[0]['VERSION()']
 
-        my_all_dbs = self.__query("SHOW DATABASES")
         db_sizes = self.__query("SELECT s.schema_name 'Database', ifnull(SUM( t.data_length + t.index_length), 0) 'Size' \
                                 FROM information_schema.SCHEMATA s \
                                   left outer join information_schema.TABLES t on s.schema_name = t.table_schema \

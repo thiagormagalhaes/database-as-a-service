@@ -12,6 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import HttpResponse, HttpResponseRedirect
 from django.template import RequestContext
+
 from dbaas_cloudstack.models import CloudStackPack
 from dbaas_credentials.models import CredentialType
 from dbaas import constants
@@ -21,10 +22,11 @@ from physical.models import Host, DiskOffering, Environment, Plan
 from util import get_credentials_for
 from notification.tasks import TaskRegister
 from system.models import Configuration
-from .errors import DisabledDatabase
-from .forms.database import DatabaseDetailsForm
-from .models import Credential, Database, Project
-from .validators import check_is_database_enabled, check_is_database_dead, ParameterValidator
+from logical.errors import DisabledDatabase
+from logical.forms.database import DatabaseDetailsForm
+from logical.models import Credential, Database, Project
+from logical.validators import (check_is_database_enabled, check_is_database_dead,
+                                ParameterValidator)
 
 
 class CredentialView(BaseDetailView):
@@ -78,6 +80,7 @@ class CredentialView(BaseDetailView):
         credential.delete()
         return self.as_json(credential)
 
+
 def check_permission(request, id, tab):
     is_dba = request.user.team_set.filter(role__name="role_dba")
 
@@ -111,6 +114,7 @@ def check_permission(request, id, tab):
 
     return context
 
+
 def database_view(tab):
     def database_decorator(func):
         def func_wrapper(request, id):
@@ -130,6 +134,7 @@ def database_view_class(tab):
             return func(self, request, context, context['database'])
         return func_wrapper
     return database_decorator
+
 
 def user_tasks(user):
     url = reverse('admin:notification_taskhistory_changelist')
@@ -154,7 +159,12 @@ def database_details(request, context, database):
     engine = str(database.engine)
     topology = database.databaseinfra.plan.replication_topology
     engine = engine + " - " + topology.details if topology.details else engine
+    try:
+        masters_quant = len(database.driver.get_master_instance())
+    except TypeError:
+        masters_quant = 1
 
+    context['masters_quant'] = masters_quant
     context['engine'] = engine
     context['projects'] = Project.objects.all()
     context['teams'] = Team.objects.all()
@@ -170,6 +180,7 @@ def database_credentials(request, context, database=None):
     return render_to_response(
         "logical/database/details/credentials_tab.html", context
     )
+
 
 class DatabaseParameters(TemplateView):
 
@@ -241,7 +252,6 @@ class DatabaseParameters(TemplateView):
             if not topology_parameter.dynamic:
                 self.there_is_static_parameter = True
 
-
             try:
                 infra_parameter = DatabaseInfraParameter.objects.get(
                     databaseinfra=databaseinfra,
@@ -256,7 +266,7 @@ class DatabaseParameters(TemplateView):
                 applied_on_database = infra_parameter.applied_on_database
                 reset_default_value = infra_parameter.reset_default_value
 
-            if self.form_status==self.TASK_ERROR:
+            if self.form_status == self.TASK_ERROR:
                 try:
                     infra_parameter = DatabaseInfraParameter.objects.get(
                         databaseinfra=databaseinfra,
@@ -287,8 +297,6 @@ class DatabaseParameters(TemplateView):
 
         return form_parameters
 
-
-
     def get_context_data(self, **kwargs):
         from physical.models import DatabaseInfraParameter
 
@@ -307,7 +315,7 @@ class DatabaseParameters(TemplateView):
                 self.form_status = self.TASK_ERROR
 
         form_database_parameters = self.get_form_parameters(self.database)
-        
+
         self.context['form_database_parameters'] = form_database_parameters
         self.context['static_parameter'] = self.there_is_static_parameter
         self.context['PROTECTED'] = self.PROTECTED
@@ -320,10 +328,8 @@ class DatabaseParameters(TemplateView):
 
         return self.context
 
-
-
     def post(self, request, *args, **kwargs):
-        
+
         context, database = args
 
         if 'edit_parameters' in request.POST:
@@ -354,7 +360,7 @@ class DatabaseParameters(TemplateView):
             can_do_change_parameters, error = database.can_do_change_parameters()
             if not can_do_change_parameters:
                 messages.add_message(request, messages.ERROR, error)
-                return self.get(request)                
+                return self.get(request)
             else:
                 changed_parameters, error = self.update_database_parameters(request.POST, database)
                 if error:
@@ -367,14 +373,13 @@ class DatabaseParameters(TemplateView):
                     )
                 return self.get(request)
 
-
-
     @database_view_class('parameters')
     def dispatch(self, request, *args, **kwargs):
         self.context, self.database = args
         self.there_is_static_parameter = False
         self.form_status = self.PROTECTED
         return super(DatabaseParameters, self).dispatch(request, *args, **kwargs)
+
 
 @database_view("")
 def database_change_parameters(request, context, database):

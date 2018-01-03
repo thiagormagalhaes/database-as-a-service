@@ -1,51 +1,95 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
+from mock import MagicMock, patch
 import logging
-from django.test import TestCase
+from django.conf import settings
+
 from drivers import DriverFactory
-from physical.tests import factory as factory_physical
+from drivers.tests.base import (BaseMysqlDriverTestCase,
+                                BaseSingleInstanceUpdateSizesTest,
+                                BaseHAInstanceUpdateSizesTest)
 from logical.tests import factory as factory_logical
 from logical.models import Database
-from ..mysqldb import MySQL
-from django.conf import settings
+from drivers.mysqldb import MySQL, MySQLFOXHA
+
 
 LOG = logging.getLogger(__name__)
 
 
-class AbstractTestDriverMysql(TestCase):
-
-    def setUp(self):
-        mysql_host = settings.DB_HOST
-        mysql_port = settings.DB_PORT or 3306
-        self.mysql_endpoint = '{}:{}'.format(mysql_host, mysql_port)
-        self.databaseinfra = factory_physical.DatabaseInfraFactory(
-            user="root", password=settings.DB_PASSWORD,
-            endpoint=self.mysql_endpoint)
-        self.instance = factory_physical.InstanceFactory(
-            databaseinfra=self.databaseinfra, address=mysql_host,
-            port=mysql_port)
-        self.driver = MySQL(databaseinfra=self.databaseinfra)
-        self._mysql_client = None
-
-    def tearDown(self):
-        if not Database.objects.filter(databaseinfra_id=self.databaseinfra.id):
-            self.databaseinfra.delete()
-        if self._mysql_client:
-            self._mysql_client.close()
-        self.driver = self.databaseinfra = self._mysql_client = None
-
-    @property
-    def mysql_client(self):
-        if self._mysql_client is None:
-            self._mysql_client = self.driver.__mysql_client__(self.instance)
-        return self._mysql_client
+FAKE_QUERY_RESULT = (
+    {'Size': '15', 'Database': 'fake_name'},
+    {'Size': '13', 'Database': 'information_schema'},
+    {'Size': '7', 'Database': 'mysql'},
+    {'Size': '5', 'Database': 'performance_schema'}
+)
 
 
-class MySQLEngineTestCase(AbstractTestDriverMysql):
+@patch('drivers.mysqldb.MySQL.query', new=MagicMock(return_value=FAKE_QUERY_RESULT))
+@patch('physical.models.DiskOffering.size_bytes', new=MagicMock(return_value=90))
+class MySQLSingleUpdateUsedSizeTestCase(BaseMysqlDriverTestCase, BaseSingleInstanceUpdateSizesTest):
+
+    pass
+
+
+@patch('drivers.mysqldb.MySQL.query', new=MagicMock(return_value=FAKE_QUERY_RESULT))
+@patch('physical.models.DiskOffering.size_bytes', new=MagicMock(return_value=90))
+class MySQLFOXHAUpdateUsedSizeTestCase(BaseMysqlDriverTestCase, BaseHAInstanceUpdateSizesTest):
+
+    driver_class = MySQLFOXHA
+    instances_quantity = 2
+
+
+class MySQLUsedAndTotalTestCase(BaseMysqlDriverTestCase):
+
+    """
+    Tests MySQL total and used
+    """
+
+    def test_masters_single_instance(self):
+        """
+            Test validates return total and used size when has single instance
+        """
+        self.driver.check_instance_is_master = MagicMock(
+            side_effect=self.instance_helper.check_instance_is_master
+        )
+        self.instance.total_size_in_bytes = 105
+        self.instance.used_size_in_bytes = 55
+        self.instance.save()
+        self.assertEqual(self.driver.masters_total_size_in_bytes, 105)
+        expected_total_size_in_gb = 105 * self.GB_FACTOR
+        self.assertEqual(self.driver.get_master_instance_total_size_in_gb(), expected_total_size_in_gb)
+        self.assertEqual(self.driver.masters_used_size_in_bytes, 55)
+
+    def test_masters_foxha_instance(self):
+        """
+            Test validates return total and used size when has single instance
+        """
+        self.driver = MySQLFOXHA(databaseinfra=self.databaseinfra)
+        self.driver.check_instance_is_master = MagicMock(
+            side_effect=self.instance_helper.check_instance_is_master
+        )
+        self.instance_helper.create_instances_by_quant(
+            infra=self.databaseinfra, base_address='131',
+            instance_type=self.instance_type,
+            total_size_in_bytes=35, used_size_in_bytes=10
+        )
+
+        self.instance.total_size_in_bytes = 35
+        self.instance.used_size_in_bytes = 10
+        self.instance.save()
+        self.assertEqual(self.driver.masters_total_size_in_bytes, 35)
+        expected_total_size_in_gb = 35 * self.GB_FACTOR
+        self.assertEqual(self.driver.get_master_instance_total_size_in_gb(), expected_total_size_in_gb)
+        self.assertEqual(self.driver.masters_used_size_in_bytes, 10)
+
+
+class MySQLEngineTestCase(BaseMysqlDriverTestCase):
 
     """
     Tests MySQL Engine
     """
+    def setUp(self):
+        super(MySQLEngineTestCase, self).setUp()
 
     def test_mysqldb_app_installed(self):
         self.assertTrue(DriverFactory.is_driver_available("mysql_single"))
@@ -58,7 +102,7 @@ class MySQLEngineTestCase(AbstractTestDriverMysql):
 
     def test_connection_string(self):
         self.assertEqual(
-            "mysql://<user>:<password>@{}".format(self.mysql_endpoint), self.driver.get_connection())
+            "mysql://<user>:<password>@{}".format(self.infra_endpoint), self.driver.get_connection())
 
     def test_get_user(self):
         self.assertEqual(self.databaseinfra.user, self.driver.get_user())
@@ -73,11 +117,11 @@ class MySQLEngineTestCase(AbstractTestDriverMysql):
     def test_connection_with_database(self):
         self.database = factory_logical.DatabaseFactory(
             name="my_db_url_name", databaseinfra=self.databaseinfra)
-        self.assertEqual("mysql://<user>:<password>@{}/my_db_url_name".format(self.mysql_endpoint),
+        self.assertEqual("mysql://<user>:<password>@{}/my_db_url_name".format(self.infra_endpoint),
                          self.driver.get_connection(database=self.database))
 
 
-class ManageDatabaseMySQLTestCase(AbstractTestDriverMysql):
+class ManageDatabaseMySQLTestCase(BaseMysqlDriverTestCase):
 
     """ Test case to managing database in mysql engine """
 
@@ -87,6 +131,8 @@ class ManageDatabaseMySQLTestCase(AbstractTestDriverMysql):
             databaseinfra=self.databaseinfra)
         # ensure database is dropped
         # get fake driver
+        self.instance.address = settings.DB_HOST
+        self.instance.save()
         driver = self.databaseinfra.get_driver()
         driver.remove_database(self.database)
 
@@ -96,7 +142,7 @@ class ManageDatabaseMySQLTestCase(AbstractTestDriverMysql):
         super(ManageDatabaseMySQLTestCase, self).tearDown()
 
     def test_mysqldb_create_and_drop_database(self):
-        LOG.debug("mysql_client: %s" % type(self.mysql_client))
+        LOG.debug("mysql_client: %s" % type(self.driver_client))
         # ensures database is removed
         try:
             self.driver.remove_database(self.database)
@@ -111,7 +157,7 @@ class ManageDatabaseMySQLTestCase(AbstractTestDriverMysql):
         self.assertFalse(self.database.name in self.driver.list_databases())
 
 
-class ManageCredentialsMySQLTestCase(AbstractTestDriverMysql):
+class ManageCredentialsMySQLTestCase(BaseMysqlDriverTestCase):
 
     """ Test case to managing credentials in mysqldb engine """
 

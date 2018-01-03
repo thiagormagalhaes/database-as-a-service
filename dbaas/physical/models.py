@@ -3,18 +3,20 @@ from __future__ import absolute_import, unicode_literals
 import os
 import logging
 import simple_audit
-from django.db.models.signals import pre_save, post_save, pre_delete
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
 from django.core.cache import cache
-from django.db import models, transaction
+from django.db import models
 from django.utils.html import format_html
 from django.utils.translation import ugettext_lazy as _
 from django_extensions.db.fields.encrypted import EncryptedCharField
+
 from util.models import BaseModel
 from drivers import DatabaseInfraStatus
 from system.models import Configuration
-from .errors import NoDiskOfferingGreaterError, NoDiskOfferingLesserError
+from physical.errors import NoDiskOfferingGreaterError, NoDiskOfferingLesserError
+
 
 LOG = logging.getLogger(__name__)
 
@@ -559,9 +561,10 @@ class DatabaseInfra(BaseModel):
         if self.disk_offering and self.engine.engine_type.name != 'redis':
             return self.disk_offering.size_bytes()
 
-        if not self.per_database_size_mbytes:
-            return 0
-        return self.per_database_size_mbytes * 1024 * 1024
+        return int(
+            self.get_parameter_value_by_parameter_name('maxmemory') or
+            self.get_dbaas_parameter_default_value('maxmemory')
+        )
 
     @property
     def used(self):
@@ -830,6 +833,8 @@ class Instance(BaseModel):
     read_only = models.BooleanField(
         verbose_name=_("Is instance read only"), default=False)
     shard = models.IntegerField(null=True, blank=True)
+    used_size_in_bytes = models.FloatField(null=True, blank=True)
+    total_size_in_bytes = models.FloatField(null=True, blank=True)
 
     class Meta:
         unique_together = (
@@ -838,6 +843,10 @@ class Instance(BaseModel):
         permissions = (
             ("view_instance", "Can view instances"),
         )
+
+    @property
+    def is_alive(self):
+        return self.status == self.ALIVE
 
     @property
     def is_database(self):
@@ -897,7 +906,7 @@ class Instance(BaseModel):
             status = self.databaseinfra.get_driver().check_status(
                 instance=self)
             return status
-        except Exception, e:
+        except:
             return False
 
     @property

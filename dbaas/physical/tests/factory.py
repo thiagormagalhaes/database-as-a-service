@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
 import factory
+# TODO: Remove this specific dbaas imports
 from dbaas_nfsaas.models import HostAttr
-from .. import models
+from dbaas_cloudstack.models import DatabaseInfraOffering, CloudStackOffering
+from physical import models
 
 
 class EnvironmentFactory(factory.DjangoModelFactory):
@@ -36,7 +38,7 @@ class DiskOfferingFactory(factory.DjangoModelFactory):
     FACTORY_FOR = models.DiskOffering
 
     name = factory.Sequence(lambda n: 'disk-offering-{0}'.format(n))
-    size_kb = 1048576 # 1gb
+    size_kb = 1048576  # 1gb
 
 
 class ReplicationTopologyFactory(factory.DjangoModelFactory):
@@ -62,8 +64,8 @@ class PlanFactory(factory.DjangoModelFactory):
     is_active = True
     engine = factory.SubFactory(EngineFactory)
     provider = 0
-    disk_offering = DiskOfferingFactory()
-    replication_topology = ReplicationTopologyFactory()
+    disk_offering = factory.SubFactory(DiskOfferingFactory)
+    replication_topology = factory.SubFactory(ReplicationTopologyFactory)
 
     @factory.post_generation
     def environments(self, create, extracted, **kwargs):
@@ -103,6 +105,22 @@ class DatabaseInfraFactory(factory.DjangoModelFactory):
         return PlanFactory(environments=[self.environment])
 
 
+class CloudStackOfferingFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = CloudStackOffering
+
+    serviceofferingid = '999'
+    name = factory.Sequence(lambda n: 'CloudStackOffering-{0}'.format(n))
+    weaker = False
+    memory_size_mb = 998
+
+
+class DatabaseInfraOfferingFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = DatabaseInfraOffering
+
+    databaseinfra = factory.SubFactory(DatabaseInfraFactory)
+    offering = factory.SubFactory(CloudStackOfferingFactory)
+
+
 class InstanceFactory(factory.DjangoModelFactory):
     FACTORY_FOR = models.Instance
 
@@ -113,6 +131,8 @@ class InstanceFactory(factory.DjangoModelFactory):
     hostname = factory.SubFactory(HostFactory)
     status = 1
     instance_type = 2
+    total_size_in_bytes = 100
+    used_size_in_bytes = 50
 
 
 class NFSaaSHostAttr(factory.DjangoModelFactory):
@@ -125,3 +145,18 @@ class NFSaaSHostAttr(factory.DjangoModelFactory):
     is_active = True
     nfsaas_size_kb = 1000
     nfsaas_used_size_kb = 10
+
+
+class ParameterFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = models.Parameter
+
+    engine_type = factory.SubFactory(EngineTypeFactory)
+    name = 'fake_parameter'
+
+
+class DatabaseInfraParameterFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = models.DatabaseInfraParameter
+
+    databaseinfra = factory.SubFactory(DatabaseInfraFactory)
+    parameter = factory.SubFactory(ParameterFactory)
+    value = ''

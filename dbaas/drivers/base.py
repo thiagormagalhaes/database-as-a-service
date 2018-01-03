@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
 import logging
+from collections import Iterable
 from django.utils.translation import ugettext_lazy as _
 from .errors import ConnectionError
 
@@ -8,7 +9,6 @@ from .errors import ConnectionError
 LOG = logging.getLogger(__name__)
 
 __all__ = ['BaseDriver', 'DatabaseStatus', 'DatabaseInfraStatus']
-
 
 
 class BaseDriver(object):
@@ -32,6 +32,13 @@ class BaseDriver(object):
         else:
             raise TypeError(_("DatabaseInfra is not defined"))
 
+    def _masters_size_in_bytes(self, field_lookup):
+        masters = self.get_master_instance()
+        masters = [masters] if not isinstance(masters, Iterable) else masters
+        return sum(map(
+            lambda m: getattr(m, field_lookup) or 0, masters
+        ))
+
     @property
     def replication_topology(self):
         return self.databaseinfra.plan.replication_topology
@@ -42,6 +49,20 @@ class BaseDriver(object):
         return util.get_replication_topology_instance(
             self.replication_topology.class_path
         )
+
+    @property
+    def masters_total_size_in_bytes(self):
+        """
+            Return total size of all masters instances on infra.
+        """
+        return self._masters_size_in_bytes('total_size_in_bytes')
+
+    @property
+    def masters_used_size_in_bytes(self):
+        """
+            Return used size of all masters instances on infra.
+        """
+        return self._masters_size_in_bytes('used_size_in_bytes')
 
     def test_connection(self, credential=None):
         """ Tests the connection to the database """
@@ -68,6 +89,49 @@ class BaseDriver(object):
     def info(self):
         """ Returns a mapping with same attributes of databaseinfra """
         raise NotImplementedError()
+
+    def get_total_size_from_instance(self, instance):
+        """
+            Method used in update_infra_instances_sizes.
+            Return total size in bytes from instance.
+        """
+        raise NotImplementedError()
+
+    def get_used_size_from_instance(self, instance):
+        """
+            Method used in update_infra_instances_sizes.
+            Return used size in bytes from instance.
+        """
+        raise NotImplementedError()
+
+    def update_infra_instances_sizes(self):
+        updated_instances = []
+
+        for instance in self.get_database_instances():
+            if instance.is_alive:
+                instance.used_size_in_bytes = self.get_used_size_from_instance(instance)
+                instance.total_size_in_bytes = self.get_total_size_from_instance(instance)
+                instance.save()
+                updated_instances.append("{} - OK\n".format(instance.dns))
+            else:
+                updated_instances.append("{} - ERROR\n".format(instance.dns))
+
+        return updated_instances
+
+    def get_master_instance_total_size_in_gb(self, instance=None):
+        """ Return total size of a instance.
+            If instance not passed the total of first master instance
+            will be returned.
+        """
+        from logical.models import GB_FACTOR
+        if instance is None:
+            instance = self.get_master_instance()
+            if instance and isinstance(instance, Iterable):
+                instance = instance[0]
+
+        if hasattr(instance, 'total_size_in_bytes'):
+            return (instance.total_size_in_bytes or 0) * GB_FACTOR
+        return 0
 
     def create_user(self, credential, roles=None):
         raise NotImplementedError()

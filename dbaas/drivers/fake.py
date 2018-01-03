@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
 import logging
+from drivers import BaseDriver, DatabaseInfraStatus
+from drivers.errors import ConnectionError
 from physical.models import Instance
-from . import BaseDriver, DatabaseInfraStatus
 
 LOG = logging.getLogger(__name__)
 
-# {
-#   databaseinfra_name: {
-#       database_name: {
-#           database_user: pwd
-#       }
-#   }
-# }
 DATABASES_INFRA = {}
 DATABASES_CREATED = {}
 
@@ -53,8 +47,6 @@ class FakeDriver(BaseDriver):
 
     def create_user(self, credential, roles=["readWrite", "dbAdmin"]):
         instance_data = self.__get_database_infra()
-        # if credential.user in instance_data[credential.database.name]:
-        # raise CredentialAlreadyExists
         instance_data[credential.database.name][
             credential.user] = credential.password
         LOG.info('Created user %s', credential)
@@ -67,8 +59,6 @@ class FakeDriver(BaseDriver):
     def update_user(self, credential):
         LOG.info('Update user %s', credential)
         instance_data = self.__get_database_infra()
-        # if credential.user not in instance_data[credential.database.name]:
-        # raise InvalidCredential
         instance_data[credential.database.name][
             credential.user] = credential.password
         LOG.info('Created user %s', credential)
@@ -82,6 +72,24 @@ class FakeDriver(BaseDriver):
             databaseinfra_model=self.databaseinfra)
         LOG.info('Info')
         return databaseinfra_status
+
+    def get_master_instance(self, ):
+        instances = self.get_database_instances()
+        masters = []
+        for instance in instances:
+            try:
+                if self.check_instance_is_master(instance):
+                    masters.append(instance)
+            except ConnectionError:
+                continue
+
+        if masters:
+            if len(masters) == 1:
+                return masters[0]
+            else:
+                return masters
+        else:
+            return None
 
     def change_default_pwd(self, instance):
         LOG.info('Change default password')

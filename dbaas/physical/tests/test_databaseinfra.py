@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
+import logging
 import mock
 from django.test import TestCase
-from django.contrib.admin.sites import AdminSite
-from logical.tests import factory as factory_logical
-from ..admin.databaseinfra import DatabaseInfraAdmin
-from ..models import DatabaseInfra, Plan, Instance, Host
-from dbaas_nfsaas.models import HostAttr
-from . import factory
-from drivers.fake import FakeDriver
 from django.core.cache import cache
-import logging
+from django.contrib.admin.sites import AdminSite
+
+from logical.tests import factory as factory_logical
+from physical.admin.databaseinfra import DatabaseInfraAdmin
+from physical.models import (DatabaseInfra, Plan, Instance, Host, Parameter,
+                             DatabaseInfraParameter)
+from dbaas_nfsaas.models import HostAttr
+from dbaas_cloudstack.models import DatabaseInfraOffering, CloudStackOffering
+from physical.tests import factory
+from drivers.fake import FakeDriver
+
 
 LOG = logging.getLogger(__name__)
 EDITING_CLOUDSTACK_READ_ONLY_FIELDS = ('disk_offering', )
@@ -37,6 +41,12 @@ class PropertiesTestCase(TestCase):
             host=cls.hostname
         )
 
+        cs_offering = factory.CloudStackOfferingFactory(memory_size_mb=9)
+        cls.infra_offering = factory.DatabaseInfraOfferingFactory(
+            databaseinfra=cls.databaseinfra,
+            offering=cs_offering
+        )
+
     @classmethod
     def tearDownClass(cls):
         HostAttr.objects.all().delete()
@@ -44,6 +54,10 @@ class PropertiesTestCase(TestCase):
         Host.objects.all().delete()
         DatabaseInfra.objects.all().delete()
         Plan.objects.all().delete()
+        CloudStackOffering.objects.all().delete()
+        DatabaseInfraOffering.objects.all().delete()
+        Parameter.objects.all().delete()
+        DatabaseInfraParameter.objects.all().delete()
 
     def test_disk_used_size_in_gb_convert(self):
         '''
@@ -78,6 +92,43 @@ class PropertiesTestCase(TestCase):
 
         self.assertEqual(self.databaseinfra.disk_used_size_in_gb, 0)
 
+    def test_size_for_redis_engine(self):
+        '''
+            Test property: per_database_size_bytes
+            case: When engine type is redis the value must be from parameter table
+        '''
+
+        self.databaseinfra.engine.engine_type.name = 'redis'
+        self.databaseinfra.engine.engine_type.save()
+        factory.DatabaseInfraParameterFactory(
+            value='110000', parameter__name='maxmemory',
+            databaseinfra=self.databaseinfra
+        )
+
+        self.assertEqual(self.databaseinfra.per_database_size_bytes, 110000)
+
+    def test_size_for_redis_engine_configuration(self):
+        '''
+            Test property: per_database_size_bytes
+            case: When engine type is redis the value must be from configuration
+                  when not found on parameter table
+        '''
+
+        self.databaseinfra.engine.engine_type.name = 'redis'
+        self.databaseinfra.engine.engine_type.save()
+        self.assertEqual(self.databaseinfra.per_database_size_bytes, 4718592)
+
+    def test_size_for_not_redis_engine(self):
+        '''
+            Test property: per_database_size_bytes
+            case: When engine type NOT is redis the value must be from disk_offering
+        '''
+
+        self.databaseinfra.engine.engine_type.name = 'mysql'
+        self.databaseinfra.engine.engine_type.save()
+        self.databaseinfra.disk_offering.size_kb = 10
+        self.assertEqual(self.databaseinfra.per_database_size_bytes, 10240)
+
 
 class DatabaseInfraTestCase(TestCase):
 
@@ -97,7 +148,7 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra = factory.DatabaseInfraFactory(
             plan=plan, environment=environment)
-        instance = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra)
         self.assertEqual(datainfra, DatabaseInfra.best_for(
             plan=plan, environment=environment, name="test"))
@@ -107,11 +158,11 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra1 = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=10)
-        instance1 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra1)
         datainfra2 = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=10)
-        instance2 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.2", port=27017, databaseinfra=datainfra2)
         for i in range(10):
             should_choose = (datainfra1, datainfra2)[i % 2]
@@ -126,9 +177,9 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra1 = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=10)
-        instance1 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra1, status=1)
-        instance2 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.2", port=27017, databaseinfra=datainfra1, status=1)
 
         self.assertEquals(
@@ -139,9 +190,9 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra1 = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=10)
-        instance1 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra1, status=0)
-        instance2 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.2", port=27017, databaseinfra=datainfra1, status=0)
 
         self.assertEquals(
@@ -152,9 +203,9 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra1 = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=10)
-        instance1 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra1, status=1)
-        instance2 = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.2", port=27017, databaseinfra=datainfra1, status=0)
 
         self.assertEquals(
@@ -167,7 +218,7 @@ class DatabaseInfraTestCase(TestCase):
         environment = plan.environments.all()[0]
         datainfra = factory.DatabaseInfraFactory(
             plan=plan, environment=environment, capacity=NUMBER_OF_DATABASES_TO_TEST)
-        instance = factory.InstanceFactory(
+        factory.InstanceFactory(
             address="127.0.0.1", port=27017, databaseinfra=datainfra)
         for i in range(NUMBER_OF_DATABASES_TO_TEST):
             self.assertEqual(datainfra, DatabaseInfra.best_for(

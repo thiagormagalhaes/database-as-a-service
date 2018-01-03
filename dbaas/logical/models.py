@@ -3,6 +3,7 @@ from __future__ import absolute_import, unicode_literals
 import simple_audit
 import logging
 import datetime
+from datetime import date, timedelta
 from django.db import models, transaction, Error
 from django.db.models.signals import pre_save, post_save, pre_delete
 from django.contrib.auth.models import User
@@ -12,17 +13,18 @@ from django.utils.functional import cached_property
 from django.utils.html import format_html
 from django.utils.translation import ugettext_lazy as _
 from django_extensions.db.fields.encrypted import EncryptedCharField
+
 from util import slugify, make_db_random_password
 from util.models import BaseModel
 from physical.models import DatabaseInfra, Environment
 from drivers import factory_for
 from system.models import Configuration
-from datetime import date, timedelta
 from account.models import Team
 from drivers.base import DatabaseStatus
 from drivers.errors import ConnectionError
 from logical.validators import database_name_evironment_constraint
 from notification.models import TaskHistory
+
 
 LOG = logging.getLogger(__name__)
 KB_FACTOR = 1.0 / 1024.0
@@ -202,6 +204,14 @@ class Database(BaseModel):
         )
 
         ordering = ('name', )
+
+    @property
+    def is_in_memory(self):
+        return self.engine.engine_type.is_in_memory
+
+    @property
+    def has_persistence(self):
+        return self.plan.has_persistence
 
     @property
     def infra(self):
@@ -470,31 +480,31 @@ class Database(BaseModel):
 
     @property
     def total_size(self):
-        return self.databaseinfra.per_database_size_bytes
+        return self.driver.masters_total_size_in_bytes
 
     @property
     def total_size_in_kb(self):
-        return round(self.databaseinfra.per_database_size_bytes * KB_FACTOR, 2)
+        return round(self.driver.masters_total_size_in_bytes * KB_FACTOR, 2)
 
     @property
     def total_size_in_mb(self):
-        return round(self.databaseinfra.per_database_size_bytes * MB_FACTOR, 2)
+        return round(self.driver.masters_total_size_in_bytes * MB_FACTOR, 2)
 
     @property
     def total_size_in_gb(self):
-        return round(self.databaseinfra.per_database_size_bytes * GB_FACTOR, 2)
+        return round(self.driver.masters_total_size_in_bytes * GB_FACTOR, 2)
 
     @property
     def used_size_in_kb(self):
-        return self.used_size_in_bytes * KB_FACTOR
+        return self.driver.masters_used_size_in_bytes * KB_FACTOR
 
     @property
     def used_size_in_mb(self):
-        return self.used_size_in_bytes * MB_FACTOR
+        return self.driver.masters_used_size_in_bytes * MB_FACTOR
 
     @property
     def used_size_in_gb(self):
-        return self.used_size_in_bytes * GB_FACTOR
+        return self.driver.masters_used_size_in_bytes * GB_FACTOR
 
     @property
     def capacity(self):

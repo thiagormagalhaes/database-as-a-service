@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 import datetime
+import traceback
 from celery.utils.log import get_task_logger
 from celery.exceptions import SoftTimeLimitExceeded
 from django.db.models import Sum, Count
+
 from dbaas.celery import app
 from account.models import Team
 from logical.models import Database
@@ -17,12 +19,12 @@ from util.providers import make_infra, clone_infra, destroy_infra, \
     get_database_change_parameter_retry_steps_count, get_deploy_instances_size
 from simple_audit.models import AuditRequest
 from system.models import Configuration
-from .models import TaskHistory
+from notification.models import TaskHistory
 from workflow.workflow import steps_for_instances, rollback_for_instances_full
-from maintenance.models import DatabaseUpgrade, DatabaseResize
-from maintenance.models import DatabaseChangeParameter
-from maintenance.models import DatabaseReinstallVM
+from maintenance.models import (DatabaseUpgrade, DatabaseResize,
+                                DatabaseChangeParameter, DatabaseReinstallVM)
 from maintenance.tasks import restore_database
+
 
 LOG = get_task_logger(__name__)
 
@@ -394,15 +396,18 @@ def update_database_status(self):
 
         task_history.update_status_for(TaskHistory.STATUS_SUCCESS, details="\n".join(
             value for value in msgs))
-    except Exception as e:
-        task_history.update_status_for(TaskHistory.STATUS_ERROR, details=e)
+    except Exception:
+        task_history.update_status_for(
+            TaskHistory.STATUS_ERROR,
+            details=traceback.format_exc()
+        )
 
     return
 
 
 @app.task(bind=True)
 @only_one(key="get_databases_used_size")
-def update_database_used_size(self):
+def update_database_used_size_old(self):
     LOG.info("Retrieving all databases")
     try:
         worker_name = get_worker_name()
@@ -420,6 +425,35 @@ def update_database_used_size(self):
             database.save(update_fields=['used_size_in_bytes'])
             msg = "\nUpdating used size in bytes for database: {}, used size: {}".format(
                 database, database.used_size_in_bytes)
+            msgs.append(msg)
+            LOG.info(msg)
+
+        task_history.update_status_for(TaskHistory.STATUS_SUCCESS, details="\n".join(
+            value for value in msgs))
+    except Exception as e:
+        task_history.update_status_for(TaskHistory.STATUS_ERROR, details=e)
+
+    return
+
+
+@app.task(bind=True)
+@only_one(key="update_infra_instances_sizes")
+def update_infra_instances_sizes(self):
+    """
+        Update used and total size of all instances databases
+    """
+
+    LOG.info("Retrieving all databases")
+    try:
+        worker_name = get_worker_name()
+        task_history = TaskHistory.register(
+            request=self.request, user=None, worker_name=worker_name)
+        databases = Database.objects.all()
+        msgs = []
+        for database in databases:
+            updated_instances = database.driver.update_infra_instances_sizes()
+            msg = ("\nUpdating used size in bytes for database: {}:\n\n"
+                   "{}").format(database, "".join(updated_instances))
             msgs.append(msg)
             LOG.info(msg)
 

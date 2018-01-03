@@ -5,15 +5,15 @@ import redis
 from redis.sentinel import Sentinel
 from rediscluster import StrictRedisCluster
 from contextlib import contextmanager
-from . import BaseDriver
-from . import DatabaseInfraStatus
-from . import DatabaseStatus
-from .errors import ConnectionError
+
+from drivers import BaseDriver, DatabaseInfraStatus, DatabaseStatus
+from drivers.errors import ConnectionError
 from system.models import Configuration
 from physical.models import Instance
 from util import exec_remote_command
 from util import build_context_script
 from dbaas_cloudstack.models import HostAttr
+
 
 LOG = logging.getLogger(__name__)
 
@@ -169,6 +169,24 @@ class Redis(BaseDriver):
                 )
 
         return dbs_names
+
+    @property
+    def maxmemory(self):
+        return int(
+            self.databaseinfra.get_parameter_value_by_parameter_name('maxmemory') or
+            self.databaseinfra.get_dbaas_parameter_default_value('maxmemory')
+        )
+
+    def get_total_size_from_instance(self, instance):
+        return self.maxmemory
+
+    def get_used_size_from_instance(self, instance):
+        with self.redis(instance=instance) as client:
+            if instance.status == Instance.ALIVE:
+                database_info = client.info()
+                return database_info.get(
+                    'used_memory', 0
+                )
 
     def info(self):
         infra_status = DatabaseInfraStatus(
@@ -553,7 +571,6 @@ class RedisCluster(Redis):
             password=self.databaseinfra.password,
             socket_timeout=self.connection_timeout_in_seconds,
         )
-
 
     def get_replication_info(self, instance):
         if self.check_instance_is_master(instance=instance):
