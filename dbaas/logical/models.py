@@ -49,13 +49,13 @@ class Project(BaseModel):
         blank=False
     )
     product = models.CharField(
-        max_length=200, choices=(('', ''),), default=''
+        max_length=200, choices=(('', ''),), default='', null=True, blank=True
     )
     component = models.CharField(
-        max_length=200, choices=(('', ''),), default=''
+        max_length=200, choices=(('', ''),), default='', null=True, blank=True
     )
     subcomponent = models.CharField(
-        max_length=200, choices=(('', ''),), default=''
+        max_length=200, choices=(('', ''),), default='', null=True, blank=True
     )
 
     def __unicode__(self):

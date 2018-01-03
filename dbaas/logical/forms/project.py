@@ -90,21 +90,21 @@ class ProjectForm(models.ModelForm):
             name='client'
         )
         self.fields['product'] = RemoteChoiceField(
-            required=True, label='Product',
+            required=False, label='Product',
             remote_host='http://dicionario.dev.globoi.com',
             remote_url='/v1/custeio/produtos',
             model_instance=self.instance,
             name='product'
         )
         self.fields['component'] = RemoteChoiceField(
-            required=True, label='Component',
+            required=False, label='Component',
             remote_host='http://dicionario.dev.globoi.com',
             remote_url='/v1/custeio/componentes',
             model_instance=self.instance,
             name='component'
         )
         self.fields['subcomponent'] = RemoteChoiceField(
-            required=True, label='Subcomponent',
+            required=False, label='Subcomponent',
             remote_host='http://dicionario.dev.globoi.com',
             remote_url='/v1/custeio/sub-componentes',
             model_instance=self.instance,
